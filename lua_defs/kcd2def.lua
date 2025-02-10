@@ -7,6 +7,7 @@
 ---@module "kcd2def-builtin"
 ---@module "kcd2def-magic"
 ---@module "kcd2def-enums"
+---@module "kcd2def-loaded"
 
 
 ---@alias kcd2def*unknown_function (fun(...): ...)? this function has not been investigated yet (pair with '---@deprecated' or 'private' to generate warning)
@@ -34,7 +35,7 @@
 --- Common Structures (no metatable, but common fields)
 
 
----@class kcd2def*Actor.PhysicalStats
+---@class kcd2def*BasicActor.PhysicalStats
 ---@field public mass number
 
 ---@class kcd2def*AnimDoor.FlowEvents.Input
@@ -62,23 +63,412 @@
 --- Actual Classes (structure of something with a metatable or is a global metatable)
 
 
----@class kcd2def*Actor
----@field public AwakePhysics fun(self: kcd2def*Actor, unk_1: 1|number): nil
----@field public AddImpulse fun(self: kcd2def*Actor, unk_1: -1|number, unk_position: kcd2def*Vector, unk_up: kcd2def*Vector, unk_acceleration: number): nil
----@field public GetPhysicalStats fun(self:kcd2def*Actor): kcd2def*Actor.PhysicalStats
----@field public GetWorldDir fun(self: kcd2def*Actor): kcd2def*Vector
----@field public GetWorldPos fun(self: kcd2def*Actor): kcd2def*Vector
+---@class kcd2def*BasicActor
+---@field public AwakePhysics fun(self: kcd2def*BasicActor, unk_1: 1|number): nil
+---@field public AddImpulse fun(self: kcd2def*BasicActor, unk_1: -1|number, unk_position: kcd2def*Vector, unk_up: kcd2def*Vector, unk_acceleration: number): nil
+---@field public GetPhysicalStats fun(self:kcd2def*BasicActor): kcd2def*BasicActor.PhysicalStats
+---@field public GetWorldDir fun(self: kcd2def*BasicActor): kcd2def*Vector
+---@field public GetWorldPos fun(self: kcd2def*BasicActor): kcd2def*Vector
+do local BasicActor = { -- TODO: break this up into the class
+	['GetDogActions'] = function (...) end;
+	['InitialSetup'] = function (...) end;
+	['InteractorPriority'] = 2;
+	['IsChatUsable'] = 0;
+	['IsDogUsable'] = 1;
+	['OnDogRequest'] = function (...) end;
+	['OnSpawn'] = function (...) end;
+	['Properties'] = {
+		['CharacterSounds'] = {
+			['foleyEffect'] = 'foleys';
+			['footstepEffect'] = 'footsteps';
+		};
+		['ControlProfile'] = 0;
+		['LipSync'] = {
+			['TransitionQueueSettings'] = {
+				['nAnimLayer'] = 12;
+				['nCharacterSlot'] = 0;
+				['playbackWeight'] = 0.75;
+				['sDefaultAnimName'] = 'facial_chewing_01';
+			};
+			['bEnabled'] = true;
+			['esLipSyncType'] = 'LipSync_TransitionQueue';
+		};
+		['Rendering'] = {
+			['bWrinkleMap'] = true;
+		};
+		['Script'] = {
+			['Misc'] = '';
+			['bIdleUntilFirstPatch'] = false;
+		};
+		['bIsDummy'] = false;
+		['fileHitDeathReactionsParamsDataFile'] = 'Libs/HitDeathReactionsData/HitDeathReactions_Default.xml';
+		['physicMassMult'] = 1;
+	};
+	['Reset'] = function (...) end;
+	['ResetCommon'] = function (...) end;
+	['ReviveInEditor'] = function (...) end;
+	['SetActorModel'] = function (...) end;
+	['gameParams'] = {
+		['stance'] = {
+			['carryCorpse'] = {
+				['heightCollider'] = 0.9;
+				['heightPivot'] = 0;
+				['name'] = 'carryCorpse';
+				['size'] = {
+					['x'] = 0.4;
+					['y'] = 0.4;
+					['z'] = 0.15;
+				};
+				['stanceId'] = 9;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['combat'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'combat';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 0;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['crouch'] = {
+				['heightCollider'] = 0.8;
+				['heightPivot'] = 0;
+				['name'] = 'crouch';
+				['size'] = {
+					['x'] = 0.35;
+					['y'] = 0;
+					['z'] = 0.1;
+				};
+				['stanceId'] = 1;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0;
+					['z'] = 1.1;
+				};
+			};
+			['injured'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'injured';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 7;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['normal'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'normal';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 3;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['stoneThrowing'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'stoneThrowing';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 2;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+		};
+	};
+	['physicsParams'] = {
+		['Living'] = {
+			['air_resistance'] = 0.5;
+			['colliderMat'] = 'mat_player_collider';
+			['gravity'] = 13;
+			['inertia'] = 11;
+			['inertiaAccel'] = 11;
+			['k_air_control'] = 0.1;
+			['mass'] = 80;
+			['max_climb_angle'] = 50;
+			['max_jump_angle'] = 40;
+			['max_vel_ground'] = 16;
+			['min_fall_angle'] = 90;
+			['min_slide_angle'] = 49;
+			['timeImpulseRecover'] = 1;
+		};
+		['flags'] = 0;
+		['mass'] = 80;
+		['stiffness_scale'] = 73;
+	};
+}; end
+
+
+---@class kcd2def*Player: kcd2def*BasicActor
+do local Player = { -- TODO: break this up into the class
+	['AIMovementAbility'] = {
+		['collisionAvoidanceObstacleRadius'] = 0.7;
+	};
+	['ActionController'] = 'Animations/Mannequin/ADB/kcd_male_controllerdefs.xml';
+	['AnimDatabase3P'] = 'Animations/Mannequin/ADB/kcd_male_database.adb';
+	['CheatEngine'] = function (...) end;
+	['CheatEngine_animal'] = function (...) end;
+	['CheatEngine_equipweapon'] = function (...) end;
+	['CheatEngine_money'] = function (...) end;
+	['CheatEngine_skill'] = function (...) end;
+	['CheatEngine_stat'] = function (...) end;
+	['CheatEngine_time'] = function (...) end;
+	['CheatGiveBow'] = function (...) end;
+	['Client'] = {
+		['OnInit'] = function (...) end;
+	};
+	['CombatOpponentMnTag'] = 'oppMale';
+	['GetDogActions'] = function (...) end;
+	['InitialSetup'] = function (...) end;
+	['InteractorPriority'] = 2;
+	['IsChatUsable'] = 0;
+	['IsDogUsable'] = 1;
+	['OnAction'] = function (...) end;
+	['OnDogRequest'] = function (...) end;
+	['OnInit'] = function (...) end;
+	['OnLoadAI'] = function (...) end;
+	['OnReset'] = function (...) end;
+	['OnSaveAI'] = function (...) end;
+	['OnSpawn'] = function (...) end;
+	['OpponentMnTag'] = 'relatedMale';
+	['PRTelep'] = function (...) end;
+	['PRTelepShowMessage'] = function (...) end;
+	['PRTelep_unlock'] = function (...) end;
+	['Properties'] = {
+		['CharacterSounds'] = {
+			['foleyEffect'] = 'foleys_player';
+			['footstepEffect'] = 'footsteps_player';
+		};
+		['ControlProfile'] = 0;
+		['LipSync'] = {
+			['TransitionQueueSettings'] = {
+				['nAnimLayer'] = 12;
+				['nCharacterSlot'] = 0;
+				['playbackWeight'] = 1;
+				['sDefaultAnimName'] = 'facial_chewing_01';
+			};
+			['bEnabled'] = true;
+			['esLipSyncType'] = 'LipSync_TransitionQueue';
+		};
+		['Rendering'] = {
+			['bWrinkleMap'] = true;
+		};
+		['Script'] = {
+			['Misc'] = '';
+			['bIdleUntilFirstPatch'] = false;
+		};
+		['SoundPack'] = 'ai_player_default';
+		['aicharacter_character'] = 'Player';
+		['bCanHoldInformation'] = false;
+		['bExported_to_game'] = true;
+		['bExported_to_test'] = true;
+		['bIsDummy'] = false;
+		['bSaved_by_game'] = true;
+		['clientFileModel'] = 'Objects/Characters/humans/male/skeleton/male.cdf';
+		['commrange'] = 40;
+		['esClothingConfig'] = 'male2';
+		['esCommConfig'] = 'player_default';
+		['esNavigationType'] = 'MediumSizedCharacters';
+		['esVoice'] = 'player_default';
+		['fileHitDeathReactionsParamsDataFile'] = 'Libs/HitDeathReactionsData/HitDeathReactions_SkeletonMale.xml';
+		['fileModel'] = 'Objects/Characters/humans/male/skeleton/male.cdf';
+		['fpItemHandsModel'] = '';
+		['physicMassMult'] = 1;
+	};
+	['PropertiesInstance'] = {
+		['aibehavior_behaviour'] = 'PlayerIdle';
+	};
+	['Reset'] = function (...) end;
+	['ResetCommon'] = function (...) end;
+	['ReviveInEditor'] = function (...) end;
+	['Server'] = {
+		['OnInit'] = function (...) end;
+	};
+	['SetActorModel'] = function (...) end;
+	['SetModel'] = function (...) end;
+	['UseMannequinAGState'] = true;
+	['defaultSoulClass'] = 'player';
+	['foreignCollisionDamageMult'] = 0.1;
+	['gameParams'] = {
+		['canUseComplexLookIK'] = false;
+		['lookAtSimpleHeadBone'] = 'LookIK';
+		['lookFOV'] = 720;
+		['slopeSlowdown'] = 3;
+		['stance'] = {
+			['carryCorpse'] = {
+				['heightCollider'] = 0.9;
+				['heightPivot'] = 0;
+				['name'] = 'carryCorpse';
+				['size'] = {
+					['x'] = 0.4;
+					['y'] = 0.4;
+					['z'] = 0.15;
+				};
+				['stanceId'] = 9;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['combat'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'combat';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 0;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['crouch'] = {
+				['heightCollider'] = 0.8;
+				['heightPivot'] = 0;
+				['name'] = 'crouch';
+				['size'] = {
+					['x'] = 0.35;
+					['y'] = 0;
+					['z'] = 0.1;
+				};
+				['stanceId'] = 1;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0;
+					['z'] = 1.1;
+				};
+			};
+			['injured'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'injured';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 7;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['normal'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'normal';
+				['size'] = {
+					['x'] = 0.35;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 3;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+			['stoneThrowing'] = {
+				['heightCollider'] = 1.05;
+				['heightPivot'] = 0;
+				['name'] = 'stoneThrowing';
+				['size'] = {
+					['x'] = 0.3;
+					['y'] = 0;
+					['z'] = 0.4;
+				};
+				['stanceId'] = 2;
+				['useCapsule'] = 1;
+				['viewOffset'] = {
+					['x'] = 0;
+					['y'] = 0.1;
+					['z'] = 1.6;
+				};
+			};
+		};
+	};
+	['physicsParams'] = {
+		['Living'] = {
+			['air_resistance'] = 0.5;
+			['colliderMat'] = 'mat_player_collider';
+			['gravity'] = 13;
+			['inertia'] = 11;
+			['inertiaAccel'] = 11;
+			['k_air_control'] = 0.1;
+			['mass'] = 80;
+			['max_climb_angle'] = 50;
+			['max_jump_angle'] = 40;
+			['max_vel_ground'] = 16;
+			['min_fall_angle'] = 90;
+			['min_slide_angle'] = 49;
+			['timeImpulseRecover'] = 1;
+		};
+		['flags'] = 0;
+		['mass'] = 80;
+		['stiffness_scale'] = 73;
+	};
+	['type'] = 'Player';
+	['vehicleCollisionDamageMult'] = 7.5;
+}; end
 
 
 --- Type Coercions (must use ---@type at consumer)
 
 
 
-
 --- Singleton Types (mainly for the fields of nested global tables)
 
 
----@class kcd2def*Actor-player:kcd2def*Actor
 
 ---@class kcd2def*AnimDoor.Client
 ---@field private OnLevelLoaded kcd2def*unknown_function
@@ -488,6 +878,9 @@
 ---@type kcd2def*AnimDoor
 AnimDoor = ...
 
+---@type kcd2def*BasicActor
+BasicActor = ...
+
 ---@type kcd2def*BasicAIActions
 BasicAIActions = ...
 
@@ -520,6 +913,9 @@ Minigame = ...
 
 ---@type kcd2def*Physics
 Physics = ...
+
+---@type kcd2def*Player
+Player = ...
 
 ---@type kcd2def*RPG
 RPG = ...
@@ -839,9 +1235,6 @@ json = {
     ---@type kcd2def*unknown_function
 	encode = ...;
 }
-
----@type kcd2def*Actor-player
-player = ...
 
 ---@deprecated
 ---@type kcd2def*unknown_function

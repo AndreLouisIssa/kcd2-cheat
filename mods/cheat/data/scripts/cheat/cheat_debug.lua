@@ -482,6 +482,8 @@ do
     local function generate_global_lookup(depth)
         -- associates function references with a global path
         -- uses DFS (depth-first search) currently, but BFS (breadth-first search) would be ideal
+            -- further, if multiple tables house the same function, there needs to be some way to prioritise
+            -- ideally, the root class as a table should be chosen, but that may require multiple passes
         global_lookup = {}
         reverse_global_lookup = {}
         inner_generate_global_lookup(depth,0,nil,nil,nil,_G)

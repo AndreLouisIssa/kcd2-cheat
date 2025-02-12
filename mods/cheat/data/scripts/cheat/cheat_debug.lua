@@ -262,7 +262,7 @@ do
 
     local function get_type(object)
         local t = type(object)
-        if t ~= 'table' or t ~= 'userdata' then
+        if t ~= 'table' and t ~= 'userdata' then
             return t
         end
         --assume documentation namespace
@@ -427,10 +427,11 @@ do
     end
 
     local function generate_function_lookup(depth)
+        -- associates function references with a global path
+        -- uses DFS (depth-first search) currently, but BFS (breadth-first search) would be ideal
         if function_lookup ~= nil then
             cleanup_function_lookup()
         end
-        -- assume most relevant functions are global or directly in global tables
         function_lookup = {}
         inner_generate_function_lookup(depth,0,nil,nil,nil,_G)
     end
@@ -443,7 +444,8 @@ do
         
         print("begin - aggregate_function_types")
 
-        generate_function_lookup(3)
+        -- max depth of 2 to avoid DFS tunneling into super/__index obscuring the root class
+        generate_function_lookup(2)
         aggregate = {}
         hook_set = true
     end

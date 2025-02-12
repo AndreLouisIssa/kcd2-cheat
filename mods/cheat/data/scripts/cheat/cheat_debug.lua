@@ -197,6 +197,7 @@ do
     local Cheat = Cheat
     local print_queue = {}
     local function to_print(x,...)
+        -- allows for printing without causing a loop in the hook
         print_queue[#print_queue+1] = x
     end
     local function print(...)
@@ -225,6 +226,7 @@ do
         return { n = select('#', ...), ... }
     end
 
+    local tracemode = "c" -- c, r, l are valid elements
     local hook_set = false
     local within_hook = false
     local within_call = false
@@ -278,12 +280,28 @@ do
         return namespace .. 'unknown-' .. t
     end
 
-    local function join_type_set(data,name,value)
+    local function join_type_set(data,kind,value,name)
+        local names, types
         local t = get_type(value)
-        local types = data[name]
-        if types == nil then
-            types = {}
-            data[name] = types
+        if kind == nil then
+            -- skip this layer
+            names = data
+        else
+            names = data[kind]
+            if names == nil then
+                names = {}
+                data[kind] = names
+            end
+        end
+        if name == nil then
+            -- skip this layer
+            types = names
+        else
+            types = names[name]
+            if types == nil then
+                types = {}
+                names[name] = types
+            end
         end
         types[t] = true
     end
@@ -297,6 +315,8 @@ do
         return data
     end
 
+    local type_order = {'boolean', 'integer', 'number', 'string', 'function', 'thread', 'table', 'userdata'}
+
     local function calltracer(event)
         if not hook_set then return end
         if not within_call then return end
@@ -309,37 +329,46 @@ do
         
         if p ~= nil then
             local path = p.path
-            to_print(event .. ': ' .. path)
+            --to_print(event .. ': ' .. path)
             local data = get_function_data(path)
             local i = 1
+            local n = 0
             if event == 'call' then
                 while true do
                     local name, value = getlocal(2, i)
                     if name ~= nil then
-                        if name == '(*temporary)' then
-                            name = 'vararg'
-                        else
-                            name = 'param_' .. tostring(i) .. '_' .. name
+                        if name ~= '(*temporary)' then
+                            local order = data.order
+                            if order == nil then
+                               order = {}
+                               data.order = order
+                            end
+                            n = n + 1
+                            order[n] = name
+                            join_type_set(data,'param',value,name)
+                        --else
+                            --join_type_set(data,'vararg',value)
                         end
-                        join_type_set(data,name,value)
                         i = i + 1
                     else
                         break
                     end
                 end
-            else
+            --[[
+            else -- return or line work here, line is more consistent but expensive
+                -- in theory, this may allow for documenting the names of return values
                 while true do
                     local name, value = getlocal(2, i)
                     if name ~= nil then
                         if name ~= '(*temporary)' then
-                            name = 'local_' .. tostring(i) .. '_' .. name
-                            join_type_set(data,name,value)
+                            join_type_set(data,name,value,'local',i)
                         end
                         i = i + 1
                     else
                         break
                     end
                 end
+            --]]
             end
 
         end
@@ -348,7 +377,7 @@ do
     end
 
     local function sethook_calltracer()
-        return sethook(calltracer,"cr")
+        return sethook(calltracer,tracemode)
     end
 
     local function call_aft(func,...)
@@ -369,7 +398,7 @@ do
         local data = get_function_data(path)
         if data ~= nil then
             for i = 1, args.n, 1 do
-                join_type_set(data, 'arg_' .. tostring(i), args[i])
+                join_type_set(data,'arg',args[i],i)
             end
         end
 
@@ -391,7 +420,7 @@ do
         data = get_function_data(path)
         if data ~= nil then
             for i = 1, rets.n, 1 do
-                join_type_set(data, 'return_' .. tostring(i), rets[i])
+                join_type_set(data,'return',rets[i],i)
             end
         end
 
@@ -436,7 +465,142 @@ do
         inner_generate_function_lookup(depth,0,nil,nil,nil,_G)
     end
 
-    local function begin_aft()
+    local function join_types(types)
+        -- mutates the data provided
+
+        local opt = types['nil']
+        types['nil'] = nil
+        local expr = ''
+        local sep = '|'
+        for _,t in ipairs(type_order) do
+            if types[t] then
+                types[t] = nil
+                expr = expr .. sep .. t
+            end
+        end
+        local rest = {}
+        local n = 0
+        for k in pairs(types) do
+            n = n + 1
+            rest[n] = k
+        end
+        table.sort(rest)
+        for _,t in ipairs(rest) do
+            expr = expr .. sep .. t
+        end
+        if opt then
+            expr = expr .. '?'
+        end
+        return expr:sub(2)
+    end
+
+    local function process_aft_result(result)
+        -- mutates the data provided
+
+        for _,res in pairs(result) do
+            local vars = res['vararg']
+            if vars ~= nil then
+                res['vararg'] = join_types(vars)
+            end
+            local args = res['arg']
+            if args ~= nil then
+                for i,u in ipairs(args) do
+                    args[i] = join_types(u)
+                end
+            end
+            local rets = res['return']
+            if rets ~= nil then
+                for i,u in ipairs(rets) do
+                    rets[i] = join_types(u)
+                end
+            end
+            local pars = res['param']
+            if pars ~= nil then
+                for k,u in pairs(pars) do
+                    pars[k] = join_types(u)
+                end
+            end
+        end
+
+        return result
+    end
+
+    local function dump_aft_result(result,logger)
+        -- produces hopefully valid type annotations
+
+        --tprint(results)
+
+        local paths = {}
+        do
+            local n = 0
+            for path in pairs(result) do
+                n = n + 1
+                paths[n] = path
+            end
+        end
+
+        table.sort(paths)
+
+        local prefix = ' fun('
+        local infix = '): '
+        logger = logger or function(s) Cheat:logDebug(s) end
+
+        local lastpath = nil
+        for _,path in ipairs(paths) do
+            local res = result[path]
+            local pars = res['param']
+            if pars ~= nil then
+                local pord = res['order']
+                for i,n in ipairs(pord) do
+                    pars[i] = n .. ': ' .. pars[n]
+                end
+                pars = table.concat(pars,', ')
+            else
+                local args = res['arg']
+                if args == nil then
+                    pars = ''
+                else
+                    pars = {}
+                    local n = 0
+                    for i,a in ipairs(args) do
+                        n = n + 1
+                        pars[n] = 'unk_' .. tostring(i) .. ': ' .. a
+                    end
+                    pars = table.concat(pars,', ')
+                end
+            end
+            local rets = res['return']
+            if rets == nil then
+                rets = 'nil'
+            else
+                rets = table.concat(rets,', ')
+            end
+            
+            local sig = prefix .. pars .. infix .. rets
+
+            --- private or deprecated by default so they can be manually adjusted later
+            local i = path:match'^.*()%.'
+            local key = path:sub(i+1)
+            path = path:sub(1,i-1)
+
+            if #path > 0 then
+                if path ~= lastpath then
+                    logger('')
+                    logger('---@class kcd2def*' .. path)
+                end
+                lastpath = path
+                logger('---@field private ' .. key .. sig)
+            else
+                logger('')
+                logger('---@deprecated')
+                logger('---@type' .. sig)
+                logger(key .. ' = ...')
+            end
+            
+        end
+    end
+
+    local function enable_aft()
         if hook_set then
             error('aggregate_function_types active, cannot begin')
             return
@@ -450,7 +614,7 @@ do
         hook_set = true
     end
 
-    local function end_aft()
+    local function disable_aft()
         if not hook_set then
             error('aggregate_function_types not active, cannot end')
             return
@@ -459,7 +623,9 @@ do
         hook_set = false
         clear_print_queue()
         cleanup_function_lookup()
-        tprint(aggregate)
+
+        process_aft_result(aggregate)
+        dump_aft_result(aggregate)
 
         print("end - aggregate_function_types")
         
@@ -469,10 +635,10 @@ do
     local function test_aft(f, ...)
         print('test begin')
 
-        begin_aft()
+        enable_aft()
 
         local s,m = pcall(f or nop, ...)
-        local result = end_aft()
+        local result = disable_aft()
 
         if not s then
             error(m)
@@ -482,12 +648,12 @@ do
         return result
     end
 
-    function Cheat:begin_aft()
-        return begin_aft()
+    function Cheat:enable_aft()
+        return enable_aft()
     end
 
-    function Cheat:end_aft()
-        return end_aft()
+    function Cheat:disable_aft()
+        return disable_aft()
     end
 
     function Cheat:call_aft(...)

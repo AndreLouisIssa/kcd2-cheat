@@ -193,40 +193,59 @@ end
 do
     -- since this uses debug.sethook, none of it is thread safe anyway
 
-    local nop = function() end
-    local sethook = debug.sethook
-    local hook_set = false
-    local function_lookup
-    local aggregate
+    local Cheat = Cheat
+    local print_queue = {}
+    local function to_print(x,...)
+        print_queue[#print_queue] = x
+    end
+    local function print(...)
+        return Cheat:logWarn(tostring(...))
+    end
+    local function tprint(...)
+        return Cheat:tprint(...)
+    end
+    local function error(...)
+        return Cheat:logError(...)
+    end
+    local function nop() end
 
-    local function generate_function_lookup()
-        -- assume most relevant functions are global or directly in global tables
-        function_lookup = {}
-        for k,v in pairs(_G) do
-            if k ~= '_G' then
-                local t = type(v)
-                if t == 'function' then
-                    function_lookup[v] = k
-                elseif t == 'table' then
-                    for j,u in pairs(v) do
-                        t = type(u)
-                        if t == 'function' then
-                            function_lookup[u] = k .. '.' .. j
-                        end
-                    end
-                end
-            end
+    local _G = _G
+    local pairs = pairs
+    local sethook = debug.sethook
+    local getinfo = debug.getinfo
+    local getlocal = debug.getlocal
+    local type = type
+    local pcall = pcall
+    local select = select
+    local unpack = table.unpack or unpack
+    local getmetatable = debug.getmetatable
+    local pack = function (...)
+        return { n = select('#', ...), ... }
+    end
+
+    local hook_set = false
+    local within_hook = false
+    local within_call = false
+    local aggregate
+    local function_lookup
+
+    local function resethook()
+        -- TODO: restore stored gethook?
+        return sethook()
+    end
+
+    local function clear_print_queue()
+        for i = 1, #print_queue, 1 do
+            print(print_queue[i])
+            print_queue[i] = nil
         end
     end
 
-    local function lookup_function(info)
-        local key = function_lookup[info.func]
-        if key ~= nil then
-            return '_G.' .. key
+    local function cleanup_function_lookup()
+        for f,p in pairs(function_lookup) do
+            p.parent[p.key] = f
         end
-        -- in case the name is some arbitrary local
-        -- we don't want to confuse it with a global
-        return info.name
+        function_lookup = nil
     end
 
     local function get_type(object)
@@ -236,7 +255,7 @@ do
         end
         --assume documentation namespace
         local meta = getmetatable(object)
-        if meta == nil then
+        if meta == nil or meta.type == nil then
             return t
         end
         local namespace = 'kcd2def*'
@@ -247,107 +266,217 @@ do
         return namespace .. 'unknown-' .. t
     end
 
-    local function join_type_set(data,name,datum)
-        if name == '(*temporary)' then
-            name = '...'
-        end
-        if data.types == nil then
-            data.types = {}
-        end
-        local types = data.types[name]
+    local function join_type_set(data,name,value)
+        local types = data[name]
         if types == nil then
             types = {}
-            data.types[name] = types
+            data[name] = types
         end
-        types[get_type(datum)] = true
+        local t = get_type(value)
+        --to_print(name .. ': ' .. t)
+        types[t] = true
     end
 
-    function Cheat:begin_aggregate_function_args(join,group)
+    local function get_function_data(path)
+        local data = aggregate[path]
+        if data == nil then
+            data = {}
+            aggregate[path] = data
+        end
+    end
+
+    local function calltracer(event)
+        if not hook_set then return end
+        if not within_call then return end
+        if event == 'tail return' then return end
+        
+        within_hook = true
+        
+        local info = getinfo(2,"f")
+        local p = function_lookup[info.func]
+        
+        if p ~= nil then
+            local path = p.path
+            to_print(event)
+            to_print(path)
+            local data = get_function_data(path)
+
+            local i = 1
+            if event == 'call' then
+                while true do
+                    local name, value = getlocal(2, i)
+                    if name ~= nil then
+                        if name == '(*temporary)' then
+                            name = 'vararg'
+                        else
+                            name = 'param_' .. tostring(i) .. '_' .. name
+                        end
+                        join_type_set(data,name,value)
+                        i = i + 1
+                    else
+                        break
+                    end
+                end
+            else
+                while true do
+                    local name, value = getlocal(2, i)
+                    if name ~= nil then
+                        if name ~= '(*temporary)' then
+                            name = 'local_' .. tostring(i) .. '_' .. name
+                            join_type_set(data,name,value)
+                        end
+                        i = i + 1
+                    else
+                        break
+                    end
+                end
+            end
+
+        end
+        
+        within_hook = false
+    end
+
+    local function sethook_calltracer()
+        return sethook(calltracer,"cr")
+    end
+
+    local function call_aggregate_function_types(func,...)
+        if within_hook or not hook_set then
+            return func(...)
+        end
+        local p = function_lookup[func]
+        if p == nil then
+            return func(...)
+        end
+
+        local path = p.path
+        --local args = pack(...)
+
+        local data = get_function_data(path)
+        --if data ~= nil then
+        --    for i = 1, args.n, 1 do
+        --        join_type_set(data, 'arg_' .. tostring(i), args[i])
+        --    end
+        --end
+
+        local outer_layer = not within_call
+
+        if outer_layer then
+            --sethook_calltracer()
+            within_call = true
+        end
+
+        local rets = pack(func(...))
+
+        if outer_layer then
+            within_call = false
+        end
+
+        --resethook()
+
+        --data = get_function_data(path)
+        --if data ~= nil then
+        --    for i = 1, rets.n, 1 do
+        --        join_type_set(data, 'return_' .. tostring(i), rets[i])
+        --    end
+        --end
+
+        to_print('return')
+        to_print(p.path)
+        return unpack(rets)
+    end
+
+    local function wrap_function(f)
+        return function(...) return call_aggregate_function_types(f,...) end
+    end
+
+    local function generate_function_lookup()
+        if function_lookup ~= nil then
+            cleanup_function_lookup()
+        end
+        -- assume most relevant functions are global or directly in global tables
+        function_lookup = {}
+        for k,v in pairs(_G) do
+            if k ~= '_G' and v ~= select and v ~= pcall and v ~= Cheat then
+                local t = type(v)
+                if t == 'function' then
+                    function_lookup[v] = {path = k, parent = _G, key = k}
+                    _G[k] = wrap_function(v)
+                elseif t == 'table' then
+                    for j,u in pairs(v) do
+                        if u ~= sethook then
+                            t = type(u)
+                            if t == 'function' then
+                                function_lookup[u] = {path = k .. '.' .. j, parent = v, key = j}
+                                v[j] = wrap_function(u)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local function begin_aggregate_function_types()
         if hook_set then
-            Cheat:logError('aggregate_function_args active, cannot begin')
+            error('aggregate_function_types active, cannot begin')
             return
         end
         
-        Cheat:logDebug("begin - aggregate_function_args")
+        print("begin - aggregate_function_types")
 
-        if join == nil then
-            join = join_type_set
-        end
-
-        if group == nil then
-            if function_lookup == nil then
-                generate_function_lookup()
-            end
-            group = lookup_function
-        end
-
+        generate_function_lookup()
         aggregate = {}
-
-        local calltracer = function()
-            --Cheat:logWarn('call')
-            local info = debug.getinfo(2, "flLnSu")
-            --Cheat:tprint(info)
-            local key = group(info)
-            local data = aggregate[key]
-            if data == nil then
-                data = {}
-                aggregate[key] = data
-                for k,v in pairs(info) do
-                    data[k] = v
-                end
-            end
-            local i = 1
-            while true do
-                local name, value = debug.getlocal(2, i)
-                if name ~= nil then
-                    join(data,name,value)
-                    i = i + 1
-                else
-                    break
-                end
-            end
-        end
-
-        Cheat:logDebug("tracer function created")
         hook_set = true
-        debug.sethook = nop
-        sethook(calltracer, "c")
     end
 
-    function Cheat:end_aggregate_function_args()
+    local function end_aggregate_function_types()
         if not hook_set then
-            Cheat:logError('aggregate_function_args not active, cannot end')
+            error('aggregate_function_types not active, cannot end')
             return
         end
 
-        sethook()
-        debug.sethook = sethook
         hook_set = false
-        Cheat:logDebug("end - aggregate_function_args")
+        clear_print_queue()
+        cleanup_function_lookup()
+        tprint(aggregate)
 
+        print("end - aggregate_function_types")
+        
         return aggregate
     end
 
-    function Cheat:test_aggregate_function_args()
+    local function test_aggregate_function_types(f, ...)
+        print('test begin')
 
-        local s, m = pcall(function()
+        begin_aggregate_function_types()
 
-        Cheat:begin_aggregate_function_args()
-        
-        print(1)
-        print(coroutine.running())
-        print(next(_G))
-
-        local a = Cheat:end_aggregate_function_args()
-
-        Cheat:tprint(a)
-
-        end)
+        local s,m = pcall(f or nop, ...)
+        local result = end_aggregate_function_types()
 
         if not s then
-            Cheat:logError(m)
+            error(m)
         end
 
+        print('test end')
+        return result
+    end
+
+    function Cheat:begin_aggregate_function_types()
+        return begin_aggregate_function_types()
+    end
+
+    function Cheat:end_aggregate_function_types()
+        return end_aggregate_function_types()
+    end
+
+    function Cheat:call_aggregate_function_types(...)
+        return call_aggregate_function_types(...)
+    end
+
+    function Cheat:test_aggregate_function_types(...)
+        return test_aggregate_function_types(...)
     end
 end
 

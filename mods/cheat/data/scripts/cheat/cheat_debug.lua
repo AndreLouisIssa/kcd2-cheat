@@ -231,7 +231,8 @@ do
     local within_hook = false
     local within_call = false
     local aggregate
-    local function_lookup
+    local global_lookup
+    local reverse_global_lookup
 
     local tolookup = function(t)
         local lookup = {}
@@ -255,11 +256,36 @@ do
         end
     end
 
-    local function cleanup_function_lookup()
-        for f,p in pairs(function_lookup) do
-            p.parent[p.key] = f
+    local function cleanup_global_lookup()
+        for f,p in pairs(global_lookup) do
+            if type(f) == 'function' then
+                p.parent[p.key] = f
+            end
         end
-        function_lookup = nil
+    end
+
+    local function get_metatype(meta,t)
+        if meta == nil then
+            return t
+        end
+        local mt = meta.type
+        local p
+        if mt == nil then
+            p = global_lookup ~= nil and global_lookup[meta]
+            if not p then
+                return t
+            end
+            mt = p.path
+        end
+        if mt == nil then
+            return t
+        end
+        --assume documentation namespace
+        local namespace = 'kcd2def*'
+        if p or _G[mt] == meta then
+            return namespace .. mt
+        end
+        return namespace .. 'unknown-' .. mt
     end
 
     local function get_type(object)
@@ -267,17 +293,7 @@ do
         if t ~= 'table' and t ~= 'userdata' then
             return t
         end
-        --assume documentation namespace
-        local meta = getmetatable(object)
-        if meta == nil or meta.type == nil then
-            return t
-        end
-        local namespace = 'kcd2def*'
-        t = meta.type
-        if _G[t] == meta then
-            return namespace .. t
-        end
-        return namespace .. 'unknown-' .. t
+        return get_metatype(object.__super) or get_metatype(getmetatable(object), t)
     end
 
     local function join_type_set(data,kind,value,name)
@@ -325,7 +341,7 @@ do
         within_hook = true
         
         local info = getinfo(2,"f")
-        local p = function_lookup[info.func]
+        local p = global_lookup[info.func]
         
         if p ~= nil then
             local path = p.path
@@ -384,7 +400,7 @@ do
         if within_hook or not hook_set then
             return func(...)
         end
-        local p = function_lookup[func]
+        local p = global_lookup[func]
         if p == nil then
             return func(...)
         end
@@ -432,15 +448,23 @@ do
         return function(...) return call_aft(f,...) end
     end
 
-    local function inner_generate_function_lookup(max_depth,depth,path,parent,key,value)
+    local function inner_generate_global_lookup(max_depth,depth,path,parent,key,value)
         if depth > max_depth then return end
         if depth > 0 and lookup_exclude[value] then return end
-        if function_lookup[value] ~= nil then return end
+        if global_lookup[value] ~= nil then return end
+
         local t = type(value)
+
+        if t ~= 'function' and t ~= 'table' then return end
+
+        if path ~= nil then
+            global_lookup[value] = {path = path, parent = parent, key = key}
+            reverse_global_lookup[path] = value
+        end
+
         if t == 'function' then
-            function_lookup[value] = {path = path, parent = parent, key = key}
             parent[key] = wrap_function(value)
-        elseif t == 'table' then
+        else
             for k,v in pairs(value) do
                 if type(k) == 'string' then
                     local path = path
@@ -449,20 +473,18 @@ do
                     else
                         path = k
                     end
-                    inner_generate_function_lookup(max_depth,depth+1,path,value,k,v)
+                    inner_generate_global_lookup(max_depth,depth+1,path,value,k,v)
                 end
             end
         end
     end
 
-    local function generate_function_lookup(depth)
+    local function generate_global_lookup(depth)
         -- associates function references with a global path
         -- uses DFS (depth-first search) currently, but BFS (breadth-first search) would be ideal
-        if function_lookup ~= nil then
-            cleanup_function_lookup()
-        end
-        function_lookup = {}
-        inner_generate_function_lookup(depth,0,nil,nil,nil,_G)
+        global_lookup = {}
+        reverse_global_lookup = {}
+        inner_generate_global_lookup(depth,0,nil,nil,nil,_G)
     end
 
     local function join_types(types)
@@ -528,8 +550,6 @@ do
     local function dump_aft_result(result,logger)
         -- produces hopefully valid type annotations
 
-        --tprint(results)
-
         local paths = {}
         do
             local n = 0
@@ -546,13 +566,29 @@ do
         logger = logger or function(s) Cheat:logDebug(s) end
 
         local lastpath = nil
-        for _,path in ipairs(paths) do
+        
+        for _, path in ipairs(paths) do
+
             local res = result[path]
+            local func = reverse_global_lookup[path]
+            local data = global_lookup[func]
+            local parent = data.parent
+            local metatype = get_metatype(parent,get_type(parent))
+            local key = data.key
+            path = data.path
+
             local pars = res['param']
             if pars ~= nil then
                 local pord = res['order']
                 for i,n in ipairs(pord) do
-                    pars[i] = n .. ': ' .. pars[n]
+                    local t
+                    if i == 1 and parent ~= _G and n == 'self' then
+                        -- assume this is an instance method
+                        t = metatype
+                    else
+                        t = pars[n]
+                    end
+                    pars[i] = n .. ': ' .. t
                 end
                 pars = table.concat(pars,', ')
             else
@@ -579,14 +615,11 @@ do
             local sig = prefix .. pars .. infix .. rets
 
             --- private or deprecated by default so they can be manually adjusted later
-            local i = path:match'^.*()%.'
-            local key = path:sub(i+1)
-            path = path:sub(1,i-1)
-
-            if #path > 0 then
+            if parent ~= _G then
                 if path ~= lastpath then
+                    local super = get_type(parent)
                     logger('')
-                    logger('---@class kcd2def*' .. path)
+                    logger('---@class ' .. metatype .. (super ~= nil and ': ' .. super or ''))
                 end
                 lastpath = path
                 logger('---@field private ' .. key .. sig)
@@ -608,9 +641,11 @@ do
         
         print("begin - aggregate_function_types")
 
-        -- max depth of 2 to avoid DFS tunneling into super/__index obscuring the root class
-        generate_function_lookup(2)
         aggregate = {}
+
+        -- max depth of 2 to avoid DFS tunneling into super/__index obscuring the root class
+        generate_global_lookup(2)
+        
         hook_set = true
     end
 
@@ -622,7 +657,7 @@ do
 
         hook_set = false
         clear_print_queue()
-        cleanup_function_lookup()
+        cleanup_global_lookup()
 
         process_aft_result(aggregate)
         dump_aft_result(aggregate)
